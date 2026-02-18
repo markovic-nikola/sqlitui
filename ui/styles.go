@@ -42,4 +42,10 @@ var (
 	PopupLabelStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("63"))
+
+	Logo = TitleStyle.Render(
+		" ▄▄▄▄  ▄▄▄  ▄▄    ▄▄ ▄▄▄▄▄▄ ▄▄ ▄▄ ▄▄ \n" +
+			"███▄▄ ██▀██ ██    ██   ██   ██ ██ ██ \n" +
+			"▄▄██▀ ▀███▀ ██▄▄▄ ██   ██   ▀███▀ ██ \n" +
+			"         ▀▀                          ")
 )

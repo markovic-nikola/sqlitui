@@ -1,4 +1,9 @@
-# sqlitui
+```
+ ▄▄▄▄  ▄▄▄  ▄▄    ▄▄ ▄▄▄▄▄▄ ▄▄ ▄▄ ▄▄ 
+███▄▄ ██▀██ ██    ██   ██   ██ ██ ██ 
+▄▄██▀ ▀███▀ ██▄▄▄ ██   ██   ▀███▀ ██ 
+         ▀▀                          
+```
 
 A terminal UI for browsing and querying SQLite databases.
 
@@ -17,8 +22,14 @@ Download a prebuilt binary from the [releases page](https://github.com/markovic-
 ## Usage
 
 ```bash
+# Open a database directly
 sqlitui <database.db>
+
+# Or launch and enter the path interactively
+sqlitui
 ```
+
+Supported file extensions: `.db`, `.sqlite`, `.sqlite3`
 
 ## License
 

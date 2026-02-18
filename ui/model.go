@@ -12,8 +12,6 @@ import (
 )
 
 // pane tracks which panel currently receives keyboard input.
-// This replaces the old viewState enum — both panels always exist,
-// only one is "focused" at a time.
 type pane int
 
 const (
@@ -48,6 +46,10 @@ type Model struct {
 	height int
 	err    error
 
+	// File picker screen — shown when no CLI arg is provided.
+	showPathInput bool
+	filePicker    FilePickerModel
+
 	tableList  TableListModel
 	tableData  TableDataModel
 	dataLoaded bool // true once any table's data has been fetched
@@ -61,19 +63,39 @@ type Model struct {
 	showQuery  bool
 
 	// Pane dimensions — recalculated on every WindowSizeMsg.
-	// Left panel gets ~30% of width, right gets the rest.
 	leftWidth  int
 	rightWidth int
 }
 
-func NewModel(database *sql.DB) Model {
+func NewModel(path string) Model {
+	if path != "" {
+		if err := validatePath(path); err != nil {
+			return Model{err: err}
+		}
+		database, err := db.Open(path)
+		if err != nil {
+			return Model{err: err}
+		}
+		return Model{
+			db:      database,
+			focused: paneList,
+		}
+	}
+
 	return Model{
-		db:      database,
-		focused: paneList,
+		showPathInput: true,
+		filePicker:    NewFilePickerModel(),
+		focused:       paneList,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
+	if m.showPathInput {
+		return m.filePicker.Init()
+	}
+	if m.db == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		tables, err := db.ListTables(m.db)
 		if err != nil {
@@ -85,7 +107,6 @@ func (m Model) Init() tea.Cmd {
 
 // calcPaneSizes splits the terminal width into left (~30%) and right (~70%).
 func (m *Model) calcPaneSizes() {
-	// Subtract 4 for the outer margin (AppStyle has Margin(1,2) = 2 each side).
 	available := m.width - 4
 	m.leftWidth = available * 30 / 100
 	if m.leftWidth < 25 {
@@ -95,15 +116,34 @@ func (m *Model) calcPaneSizes() {
 }
 
 // paneHeight returns the total height for a pane's border box.
-// Budget: terminal height
-//   - 2 for AppStyle margin (top 1, bottom 1)
-//   - 1 for the status bar line
-//   - 1 breathing room
 func (m Model) paneHeight() int {
 	return max(m.height-4, 5)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Always track terminal size.
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = wsm.Width
+		m.height = wsm.Height
+	}
+
+	// File picker captures all input when shown.
+	if m.showPathInput {
+		switch msg := msg.(type) {
+		case dbOpenedMsg:
+			m.db = msg.db
+			m.showPathInput = false
+			m.calcPaneSizes()
+			return m, func() tea.Msg {
+				return tablesLoadedMsg{tables: msg.tables}
+			}
+		default:
+			var cmd tea.Cmd
+			m.filePicker, cmd = m.filePicker.Update(msg)
+			return m, cmd
+		}
+	}
+
 	// Query popup captures all input when open.
 	if m.showQuery {
 		switch msg := msg.(type) {
@@ -154,7 +194,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Tab toggles focus between panes.
 		if key.Matches(msg, Keys.SwitchTab) {
 			if m.focused == paneList {
 				m.focused = paneData
@@ -164,8 +203,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Right arrow on the list pane: select table + switch focus.
-		// Skip reload if the table is already displayed.
 		if key.Matches(msg, Keys.FocusRight) && m.focused == paneList && m.loaded {
 			if m.tableList.list.FilterState() != list.Filtering {
 				m.focused = paneData
@@ -177,21 +214,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Left arrow on the data pane: switch back to list.
 		if key.Matches(msg, Keys.FocusLeft) && m.focused == paneData {
 			m.focused = paneList
 			return m, nil
 		}
 
-		// Quit — but not when the list is filtering (user is typing).
+		if msg.Type == tea.KeyEsc {
+			if m.focused == paneList && m.tableList.list.FilterState() == list.Filtering {
+				break // let the list handle esc to cancel filter
+			}
+			if m.db != nil {
+				m.db.Close()
+				m.db = nil
+			}
+			m.loaded = false
+			m.dataLoaded = false
+			m.showPathInput = true
+			m.filePicker = NewFilePickerModel()
+			m.filePicker.width = m.width
+			m.filePicker.height = m.height
+			return m, m.filePicker.Init()
+		}
+
 		if key.Matches(msg, Keys.Quit) {
 			if m.focused == paneList && m.tableList.list.FilterState() == list.Filtering {
-				break // fall through to child delegation
+				break
 			}
 			return m, tea.Quit
 		}
 
-		// Open the SQL query popup from either pane.
 		if key.Matches(msg, Keys.OpenQuery) {
 			qi, cmd := NewQueryInputModel(m.db, m.width, m.height)
 			m.queryInput = qi
@@ -199,12 +250,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	// --- Async result messages ---
-
 	case tablesLoadedMsg:
 		m.tableList = NewTableListModel(msg.tables, m.leftWidth, m.paneHeight())
 		m.loaded = true
-		// Auto-select the first table so the right panel isn't empty.
 		if len(msg.tables) > 0 {
 			return m, loadTableDataCmd(m.db, msg.tables[0])
 		}
@@ -221,7 +269,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TableSelectedMsg:
 		return m, loadTableDataCmd(m.db, msg.Name)
 
-	// Row selected in the table — open the detail popup.
 	case RowSelectedMsg:
 		m.rowDetail = NewRowDetailModel(msg.Columns, msg.Values, m.width, m.height)
 		m.showDetail = true
@@ -232,7 +279,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Delegate keyboard input ONLY to the focused pane.
 	switch m.focused {
 	case paneList:
 		if m.loaded {
@@ -252,6 +298,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.showPathInput {
+		return m.filePicker.View()
+	}
+
 	if m.err != nil {
 		return AppStyle.Render(
 			ErrorStyle.Render("Error: "+m.err.Error()) +
@@ -261,11 +311,10 @@ func (m Model) View() string {
 
 	if !m.loaded {
 		return AppStyle.Render(
-			TitleStyle.Render("sqlitui") + "\n\nLoading tables...",
+			Logo + "\n\nLoading tables...",
 		)
 	}
 
-	// Pick border style based on which pane is focused.
 	leftStyle, rightStyle := UnfocusedPaneStyle, UnfocusedPaneStyle
 	if m.focused == paneList {
 		leftStyle = FocusedPaneStyle
@@ -274,23 +323,16 @@ func (m Model) View() string {
 	}
 
 	h := m.paneHeight()
-	// contentH is the lines available inside the border (border adds 2 lines).
 	contentH := h - 2
 
-	// Clip child content to exact dimensions BEFORE wrapping in borders.
-	// MaxWidth prevents wide table rows from wrapping inside the border.
-	// MaxHeight prevents tall content from overflowing vertically.
-	// lipgloss.Height() then pads shorter content so both panels match.
 	leftClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.leftWidth - 2)
 	rightClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.rightWidth - 2)
 
-	// Render left panel.
 	leftPanel := leftStyle.
 		Width(m.leftWidth - 2).
 		Height(contentH).
 		Render(leftClip.Render(m.tableList.View()))
 
-	// Render right panel.
 	var rightContent string
 	if m.dataLoaded {
 		rightContent = m.tableData.View()
@@ -306,12 +348,9 @@ func (m Model) View() string {
 		Height(contentH).
 		Render(rightClip.Render(rightContent))
 
-	// Join the two panels side by side.
-	// lipgloss.JoinHorizontal aligns them along the top edge.
 	split := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 
-	// Status bar at the bottom — includes table info if data is loaded.
-	statusText := " ←→/tab: navigate | enter: detail | f: filter | ctrl+e: query | q: quit"
+	statusText := " ←→/tab: navigate | enter: detail | f: filter | ctrl+e: query | esc: back | q: quit"
 	if m.dataLoaded {
 		statusText = " " + m.tableData.StatusText() + " | " + statusText[1:]
 	}
@@ -321,9 +360,6 @@ func (m Model) View() string {
 		lipgloss.JoinVertical(lipgloss.Left, split, status),
 	)
 
-	// If a popup is open, overlay it centered on top of the base view.
-	// lipgloss.Place() positions a string within a given width x height area.
-	// The base view is still rendered behind it (frozen, but visible at edges).
 	if m.showDetail {
 		popup := m.rowDetail.View()
 		return lipgloss.Place(

@@ -39,9 +39,31 @@ sqlitui <database.db>
 
 # Or launch and enter the path interactively
 sqlitui
+
+# Print version
+sqlitui --version
+
+# Update to the latest release
+sqlitui --update
 ```
 
 Supported file extensions: `.db`, `.sqlite`, `.sqlite3`
+
+## Update
+
+```bash
+sqlitui --update
+```
+
+This checks GitHub for a newer release, downloads it, verifies the SHA256 checksum, and replaces the binary in place.
+
+If installed to a system directory (e.g. `/usr/local/bin`), you may need:
+
+```bash
+sudo sqlitui --update
+```
+
+Alternatively, re-run the install script to get the latest version.
 
 ## License
 

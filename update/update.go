@@ -17,6 +17,11 @@ const repo = "markovic-nikola/sqlitui"
 func CheckInBackground(currentVersion string) func() {
 	ch := make(chan string, 1)
 
+	if currentVersion == "dev" {
+		close(ch)
+		return func() {}
+	}
+
 	go func() {
 		defer close(ch)
 

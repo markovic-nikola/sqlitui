@@ -2,6 +2,7 @@ package ui
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -29,6 +30,9 @@ type tableDataLoadedMsg struct {
 	tableName string
 	columns   []string
 	rows      [][]string
+	page      int
+	pageSize  int
+	totalRows int
 }
 
 type errMsg struct {
@@ -120,6 +124,104 @@ func (m Model) paneHeight() int {
 	return max(m.height-4, 5)
 }
 
+// pageSize returns the number of visible data rows in the table, used as page size.
+// paneHeight-3 is the bubbles table Height, and the header (with border-bottom)
+// takes 2 of those lines, leaving Height-2 for actual data rows.
+func (m Model) pageSize() int {
+	return max(m.paneHeight()-5, 1)
+}
+
+// helpItem is a key binding + description pair for the status bar.
+type helpItem struct {
+	key  string
+	desc string
+}
+
+// renderStatusBar builds the full-width status bar with an info section on the
+// left and wrapped help hints on the right.
+func (m Model) renderStatusBar(info string, items []helpItem) string {
+	barW := m.width - 4 // account for AppStyle horizontal margin
+	if barW < 1 {
+		barW = 1
+	}
+
+	// Render the info section.
+	var infoRendered string
+	infoW := 0
+	if info != "" {
+		infoRendered = StatusBarInfoStyle.Render(" " + info + " ")
+		infoW = lipgloss.Width(infoRendered)
+	}
+
+	// Render help items with wrapping.
+	helpW := barW - infoW
+	if helpW < 10 {
+		helpW = barW
+		infoRendered = ""
+		infoW = 0
+	}
+
+	var helpLines []string
+	var lineItems []string
+	lineW := 0
+
+	for _, item := range items {
+		rendered := StatusBarKeyStyle.Render(" "+item.key+" ") + StatusBarDescStyle.Render(item.desc+" ")
+		itemW := lipgloss.Width(rendered)
+
+		// First line has less space (info section is there); subsequent lines use full width.
+		maxLineW := helpW
+		if len(helpLines) > 0 {
+			maxLineW = barW
+		}
+
+		if lineW > 0 && lineW+itemW > maxLineW {
+			helpLines = append(helpLines, strings.Join(lineItems, ""))
+			lineItems = nil
+			lineW = 0
+		}
+		lineItems = append(lineItems, rendered)
+		lineW += itemW
+	}
+	if len(lineItems) > 0 {
+		helpLines = append(helpLines, strings.Join(lineItems, ""))
+	}
+
+	// Build each line: info on first line only, padding on the right to fill barW.
+	var barLines []string
+	for i, hl := range helpLines {
+		hlW := lipgloss.Width(hl)
+
+		if i == 0 && infoRendered != "" {
+			lineContent := infoRendered + StatusBarBgStyle.Render(" ") + hl
+			pad := barW - infoW - 1 - hlW
+			if pad < 0 {
+				pad = 0
+			}
+			barLines = append(barLines, lineContent+StatusBarBgStyle.Render(strings.Repeat(" ", pad)))
+		} else {
+			pad := barW - hlW
+			if pad < 0 {
+				pad = 0
+			}
+			barLines = append(barLines, hl+StatusBarBgStyle.Render(strings.Repeat(" ", pad)))
+		}
+	}
+
+	if len(barLines) == 0 {
+		if infoRendered != "" {
+			pad := barW - infoW
+			if pad < 0 {
+				pad = 0
+			}
+			return infoRendered + StatusBarBgStyle.Render(strings.Repeat(" ", pad))
+		}
+		return StatusBarBgStyle.Render(strings.Repeat(" ", barW))
+	}
+
+	return strings.Join(barLines, "\n")
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Always track terminal size.
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
@@ -155,6 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tableData = NewTableDataModel(
 				"query result", msg.Columns, msg.Rows,
 				m.rightWidth, m.paneHeight(), m.db,
+				0, len(msg.Rows), len(msg.Rows),
 			)
 			m.dataLoaded = true
 			m.focused = paneData
@@ -208,7 +311,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focused = paneData
 				item, ok := m.tableList.list.SelectedItem().(TableItem)
 				if ok && (!m.dataLoaded || m.tableData.tableName != item.Name) {
-					return m, loadTableDataCmd(m.db, item.Name)
+					return m, loadTableDataCmd(m.db, item.Name, m.pageSize())
 				}
 			}
 			return m, nil
@@ -243,6 +346,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		if key.Matches(msg, Keys.Refresh) && m.dataLoaded && m.tableData.tableName != "query result" {
+			return m, loadTableDataCmd(m.db, m.tableData.tableName, m.pageSize())
+		}
+
 		if key.Matches(msg, Keys.OpenQuery) {
 			qi, cmd := NewQueryInputModel(m.db, m.width, m.height)
 			m.queryInput = qi
@@ -254,7 +361,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tableList = NewTableListModel(msg.tables, m.leftWidth, m.paneHeight())
 		m.loaded = true
 		if len(msg.tables) > 0 {
-			return m, loadTableDataCmd(m.db, msg.tables[0])
+			return m, loadTableDataCmd(m.db, msg.tables[0], m.pageSize())
 		}
 		return m, nil
 
@@ -262,12 +369,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tableData = NewTableDataModel(
 			msg.tableName, msg.columns, msg.rows,
 			m.rightWidth, m.paneHeight(), m.db,
+			msg.page, msg.pageSize, msg.totalRows,
 		)
 		m.dataLoaded = true
 		return m, nil
 
+	case pageDataLoadedMsg:
+		m.tableData.allRows = msg.rows
+		m.tableData.page = msg.page
+		if m.tableData.fActive {
+			m.tableData.fTotalRows = msg.totalRows
+		} else {
+			m.tableData.totalRows = msg.totalRows
+		}
+		m.tableData.table.SetRows(truncateRows(msg.rows, m.tableData.displayCols, m.tableData.hasHiddenCols()))
+		if msg.cursorEnd && len(msg.rows) > 0 {
+			m.tableData.table.SetCursor(len(msg.rows) - 1)
+			m.tableData.table.GotoBottom()
+		} else {
+			m.tableData.table.SetCursor(0)
+		}
+		return m, nil
+
 	case TableSelectedMsg:
-		return m, loadTableDataCmd(m.db, msg.Name)
+		return m, loadTableDataCmd(m.db, msg.Name, m.pageSize())
 
 	case RowSelectedMsg:
 		m.rowDetail = NewRowDetailModel(msg.Columns, msg.Values, m.width, m.height)
@@ -322,8 +447,26 @@ func (m Model) View() string {
 		rightStyle = FocusedPaneStyle
 	}
 
-	h := m.paneHeight()
-	contentH := h - 2
+	// Build the status bar first so we know how many lines it needs.
+	hints := []helpItem{
+		{"←→/tab", "navigate"},
+		{"enter", "detail"},
+		{"f", "filter"},
+		{"[/]", "page"},
+		{"ctrl+e", "query"},
+		{"ctrl+r", "refresh"},
+		{"esc", "back"},
+		{"q", "quit"},
+	}
+	var info string
+	if m.dataLoaded {
+		info = m.tableData.StatusText()
+	}
+	status := m.renderStatusBar(info, hints)
+	statusLines := strings.Count(status, "\n") + 1
+
+	// 3 = top margin (1) + bottom margin (1) + status bar base (1 line already counted in statusLines adjustment)
+	contentH := max(m.height-3-statusLines, 3) - 2
 
 	leftClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.leftWidth - 2)
 	rightClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.rightWidth - 2)
@@ -350,12 +493,6 @@ func (m Model) View() string {
 
 	split := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 
-	statusText := " ←→/tab: navigate | enter: detail | f: filter | ctrl+e: query | esc: back | q: quit"
-	if m.dataLoaded {
-		statusText = " " + m.tableData.StatusText() + " | " + statusText[1:]
-	}
-	status := StatusBarStyle.Render(statusText)
-
 	base := AppStyle.Render(
 		lipgloss.JoinVertical(lipgloss.Left, split, status),
 	)
@@ -380,9 +517,13 @@ func (m Model) View() string {
 	return base
 }
 
-func loadTableDataCmd(database *sql.DB, tableName string) tea.Cmd {
+func loadTableDataCmd(database *sql.DB, tableName string, pageSize int) tea.Cmd {
 	return func() tea.Msg {
-		cols, rows, err := db.GetRows(database, tableName, 1000)
+		total, err := db.CountRows(database, tableName)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		cols, rows, err := db.GetRows(database, tableName, pageSize, 0)
 		if err != nil {
 			return errMsg{err: err}
 		}
@@ -390,6 +531,9 @@ func loadTableDataCmd(database *sql.DB, tableName string) tea.Cmd {
 			tableName: tableName,
 			columns:   cols,
 			rows:      rows,
+			page:      0,
+			pageSize:  pageSize,
+			totalRows: total,
 		}
 	}
 }

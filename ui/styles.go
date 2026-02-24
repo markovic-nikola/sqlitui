@@ -16,6 +16,27 @@ var (
 	StatusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
 
+	// StatusBarInfoStyle is for the left section showing table name and page info.
+	StatusBarInfoStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("205")).
+				Background(lipgloss.Color("236")).
+				Bold(true).
+				Padding(0, 1)
+
+	// StatusBarKeyStyle highlights the key binding name (e.g. "f", "enter").
+	StatusBarKeyStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Background(lipgloss.Color("235"))
+
+	// StatusBarDescStyle is for the key description (e.g. "filter", "detail").
+	StatusBarDescStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("242")).
+				Background(lipgloss.Color("235"))
+
+	// StatusBarBgStyle is the base background for the full status bar.
+	StatusBarBgStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("235"))
+
 	ErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")).
 			Bold(true)

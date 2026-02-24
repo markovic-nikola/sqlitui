@@ -11,6 +11,9 @@ type KeyMap struct {
 	FocusLeft  key.Binding
 	Select     key.Binding
 	OpenQuery  key.Binding
+	Refresh    key.Binding
+	NextPage   key.Binding
+	PrevPage   key.Binding
 }
 
 var Keys = KeyMap{
@@ -37,5 +40,17 @@ var Keys = KeyMap{
 	OpenQuery: key.NewBinding(
 		key.WithKeys("ctrl+e"),
 		key.WithHelp("ctrl+e", "SQL query"),
+	),
+	Refresh: key.NewBinding(
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r", "refresh"),
+	),
+	NextPage: key.NewBinding(
+		key.WithKeys("]"),
+		key.WithHelp("]", "next page"),
+	),
+	PrevPage: key.NewBinding(
+		key.WithKeys("["),
+		key.WithHelp("[", "prev page"),
 	),
 }

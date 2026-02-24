@@ -73,7 +73,7 @@ func (m QueryInputModel) Update(msg tea.Msg) (QueryInputModel, tea.Cmd) {
 		case "esc":
 			return m, func() tea.Msg { return CloseDetailMsg{} }
 
-		case "ctrl+r":
+		case "ctrl+r", "ctrl+enter":
 			query := m.textarea.Value()
 			if query == "" {
 				return m, nil
@@ -96,7 +96,7 @@ func (m QueryInputModel) Update(msg tea.Msg) (QueryInputModel, tea.Cmd) {
 
 func (m QueryInputModel) View() string {
 	title := TitleStyle.Render(" SQL Query ")
-	help := StatusBarStyle.Render("ctrl+r: run | esc: close")
+	help := StatusBarStyle.Render("ctrl+r/ctrl+enter: run | esc: close")
 
 	// Always reserve the error line to prevent layout jumps.
 	errLine := " "

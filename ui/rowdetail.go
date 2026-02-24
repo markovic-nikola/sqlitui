@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // CloseDetailMsg is sent when the user dismisses the row detail popup.
@@ -55,7 +56,19 @@ func NewRowDetailModel(columns, values []string, termWidth, termHeight int) RowD
 		}
 		// Left-pad column names so the colons align.
 		label := PopupLabelStyle.Render(fmt.Sprintf("%*s", maxLabel, col))
-		b.WriteString(label + " : " + val + "\n")
+		prefix := label + " : "
+		indentWidth := lipgloss.Width(prefix)
+		valueWidth := contentWidth - indentWidth
+		if valueWidth < 10 {
+			valueWidth = 10
+		}
+
+		wrapped := wrapText(val, valueWidth)
+		b.WriteString(prefix + wrapped[0] + "\n")
+		indent := strings.Repeat(" ", indentWidth)
+		for _, line := range wrapped[1:] {
+			b.WriteString(indent + line + "\n")
+		}
 	}
 
 	vp := viewport.New(contentWidth, contentHeight)
@@ -94,4 +107,52 @@ func (m RowDetailModel) View() string {
 		Width(m.width - 2).   // -2 for border chars
 		Height(m.height - 2). // -2 for border chars
 		Render(title + "\n\n" + content + "\n" + help)
+}
+
+// wrapText breaks text into lines that fit within maxWidth visible characters.
+// It splits on spaces when possible, hard-breaking mid-word only when a single
+// word exceeds maxWidth.
+func wrapText(text string, maxWidth int) []string {
+	if maxWidth <= 0 || lipgloss.Width(text) <= maxWidth {
+		return []string{text}
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	var lines []string
+	current := words[0]
+	for _, word := range words[1:] {
+		if lipgloss.Width(current+" "+word) <= maxWidth {
+			current += " " + word
+		} else {
+			lines = append(lines, current)
+			current = word
+		}
+	}
+	lines = append(lines, current)
+
+	// Hard-break any lines where a single word exceeds maxWidth.
+	var result []string
+	for _, line := range lines {
+		if lipgloss.Width(line) <= maxWidth {
+			result = append(result, line)
+			continue
+		}
+		runes := []rune(line)
+		for len(runes) > 0 {
+			end := len(runes)
+			for end > 0 && lipgloss.Width(string(runes[:end])) > maxWidth {
+				end--
+			}
+			if end == 0 {
+				end = 1
+			}
+			result = append(result, string(runes[:end]))
+			runes = runes[end:]
+		}
+	}
+	return result
 }

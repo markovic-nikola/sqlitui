@@ -2,7 +2,7 @@
 set -e
 
 REPO="markovic-nikola/sqlitui"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS.
 OS="$(uname -s)"
@@ -57,10 +57,15 @@ echo "Checksum verified."
 # Extract and install.
 tar xzf "${TMP_DIR}/${ARCHIVE}" -C "${TMP_DIR}"
 
-if [ -w "$INSTALL_DIR" ]; then
-  mv "${TMP_DIR}/sqlitui" "${INSTALL_DIR}/sqlitui"
-else
-  sudo mv "${TMP_DIR}/sqlitui" "${INSTALL_DIR}/sqlitui"
-fi
+mkdir -p "$INSTALL_DIR"
+mv "${TMP_DIR}/sqlitui" "${INSTALL_DIR}/sqlitui"
 
 echo "Installed sqlitui to ${INSTALL_DIR}/sqlitui"
+
+# Check if INSTALL_DIR is on PATH.
+case ":$PATH:" in
+  *":${INSTALL_DIR}:"*) ;;
+  *) echo "WARNING: ${INSTALL_DIR} is not in your PATH. Add it with:"
+     echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+     ;;
+esac

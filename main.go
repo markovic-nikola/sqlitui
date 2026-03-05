@@ -19,6 +19,16 @@ var (
 func main() {
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
+		case "--help", "-h":
+			fmt.Println("sqlitui - Terminal UI for SQLite databases")
+			fmt.Println()
+			fmt.Println("Usage: sqlitui [options] [database-path]")
+			fmt.Println()
+			fmt.Println("Options:")
+			fmt.Println("  -h, --help      Show this help message")
+			fmt.Println("  -v, --version   Show version information")
+			fmt.Println("      --update    Update to the latest version")
+			return
 		case "--version", "-v":
 			fmt.Printf("sqlitui %s (%s, %s)\n", version, commit, date)
 			return

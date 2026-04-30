@@ -15,6 +15,7 @@ type KeyMap struct {
 	NextPage      key.Binding
 	PrevPage      key.Binding
 	ToggleSidebar key.Binding
+	DeleteRow     key.Binding
 }
 
 var Keys = KeyMap{
@@ -55,7 +56,11 @@ var Keys = KeyMap{
 		key.WithHelp("[", "prev page"),
 	),
 	ToggleSidebar: key.NewBinding(
-		key.WithKeys("ctrl+b"),
-		key.WithHelp("ctrl+b", "toggle sidebar"),
+		key.WithKeys("ctrl+\\"),
+		key.WithHelp("ctrl+\\", "toggle sidebar"),
+	),
+	DeleteRow: key.NewBinding(
+		key.WithKeys("delete"),
+		key.WithHelp("del", "delete row"),
 	),
 }

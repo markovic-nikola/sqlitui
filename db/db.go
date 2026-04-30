@@ -63,16 +63,16 @@ func GetColumns(db *sql.DB, table string) ([]string, error) {
 	return columns, rows.Err()
 }
 
-// GetRows fetches up to `limit` rows from a table, returning all values
-// as strings. This is intentionally simple — for a read-only explorer,
-// we don't need type-specific handling.
-func GetRows(db *sql.DB, table string, limit, offset int) ([]string, [][]string, error) {
-	rows, err := db.Query("SELECT * FROM "+quoteIdent(table)+" LIMIT ? OFFSET ?", limit, offset)
+// GetRows fetches up to `limit` rows from a table, returning rowids and all
+// values as strings. The rowid is selected separately so DELETE/UPDATE can
+// target the exact row regardless of primary key shape.
+func GetRows(db *sql.DB, table string, limit, offset int) ([]string, []int64, [][]string, error) {
+	rows, err := db.Query("SELECT rowid, * FROM "+quoteIdent(table)+" LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsWithRowID(rows)
 }
 
 // ExecQuery runs an arbitrary SQL query and returns columns + string rows.
@@ -88,14 +88,21 @@ func ExecQuery(db *sql.DB, query string) ([]string, [][]string, error) {
 
 // FilterColumn searches a table for rows where a single column matches the
 // query (case-insensitive LIKE). Single-column search is fast even on large tables.
-func FilterColumn(db *sql.DB, table, column, query string, limit, offset int) ([]string, [][]string, error) {
-	q := "SELECT * FROM " + quoteIdent(table) + " WHERE " + quoteIdent(column) + " LIKE ? COLLATE NOCASE LIMIT ? OFFSET ?"
+func FilterColumn(db *sql.DB, table, column, query string, limit, offset int) ([]string, []int64, [][]string, error) {
+	q := "SELECT rowid, * FROM " + quoteIdent(table) + " WHERE " + quoteIdent(column) + " LIKE ? COLLATE NOCASE LIMIT ? OFFSET ?"
 	rows, err := db.Query(q, "%"+query+"%", limit, offset)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsWithRowID(rows)
+}
+
+// DeleteRow removes a single row from a table identified by its rowid.
+// Works for any default SQLite table (i.e., not declared WITHOUT ROWID).
+func DeleteRow(db *sql.DB, table string, rowid int64) error {
+	_, err := db.Exec("DELETE FROM "+quoteIdent(table)+" WHERE rowid = ?", rowid)
+	return err
 }
 
 // CountRows returns the total number of rows in a table.
@@ -113,8 +120,54 @@ func CountFilteredRows(db *sql.DB, table, column, query string) (int, error) {
 	return count, err
 }
 
+// scanRowsWithRowID expects the first selected column to be `rowid`. It splits
+// rowids out into their own slice and returns the remaining columns as strings.
+func scanRowsWithRowID(rows *sql.Rows) ([]string, []int64, [][]string, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(cols) == 0 {
+		return cols, nil, nil, nil
+	}
+	userCols := cols[1:]
+
+	var rowids []int64
+	var result [][]string
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, nil, nil, err
+		}
+		var rid int64
+		switch v := values[0].(type) {
+		case int64:
+			rid = v
+		case int:
+			rid = int64(v)
+		}
+		rowids = append(rowids, rid)
+		row := make([]string, len(userCols))
+		for i, v := range values[1:] {
+			if v == nil {
+				row[i] = "NULL"
+			} else if b, ok := v.([]byte); ok {
+				row[i] = string(b)
+			} else {
+				row[i] = fmt.Sprintf("%v", v)
+			}
+		}
+		result = append(result, row)
+	}
+	return userCols, rowids, result, rows.Err()
+}
+
 // scanRows reads all rows from a *sql.Rows result set, returning column
-// names and all values as strings. Used by GetRows, ExecQuery, and SearchRows.
+// names and all values as strings. Used by ExecQuery for arbitrary user queries.
 func scanRows(rows *sql.Rows) ([]string, [][]string, error) {
 	cols, err := rows.Columns()
 	if err != nil {

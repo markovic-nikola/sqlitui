@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -12,17 +13,27 @@ import (
 // CloseDetailMsg is sent when the user dismisses the row detail popup.
 type CloseDetailMsg struct{}
 
+// DeleteRowMsg asks the parent to delete the row currently shown in the
+// detail popup. The popup also returns CloseDetailMsg so the parent dismisses it.
+type DeleteRowMsg struct {
+	TableName string
+	RowID     int64
+}
+
 // RowDetailModel displays a single row's data as a vertical key-value list
 // inside a scrollable viewport. This is the "popup" component.
 type RowDetailModel struct {
-	viewport viewport.Model
-	width    int
-	height   int
+	viewport    viewport.Model
+	width       int
+	height      int
+	tableName   string
+	rowID       int64
+	deleteArmed bool // true after first del press; second confirms.
 }
 
 // NewRowDetailModel creates the popup. It renders column:value pairs
 // with aligned colons so the values line up neatly.
-func NewRowDetailModel(columns, values []string, termWidth, termHeight int) RowDetailModel {
+func NewRowDetailModel(columns, values []string, tableName string, rowID int64, termWidth, termHeight int) RowDetailModel {
 	// Size the popup to ~60% of terminal width, ~70% of terminal height.
 	popupWidth := termWidth * 60 / 100
 	popupHeight := termHeight * 70 / 100
@@ -75,20 +86,32 @@ func NewRowDetailModel(columns, values []string, termWidth, termHeight int) RowD
 	vp.SetContent(b.String())
 
 	return RowDetailModel{
-		viewport: vp,
-		width:    popupWidth,
-		height:   popupHeight,
+		viewport:  vp,
+		width:     popupWidth,
+		height:    popupHeight,
+		tableName: tableName,
+		rowID:     rowID,
 	}
 }
 
 func (m RowDetailModel) Update(msg tea.Msg) (RowDetailModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if key.Matches(keyMsg, Keys.DeleteRow) {
+			if m.deleteArmed {
+				tableName, rowID := m.tableName, m.rowID
+				return m, func() tea.Msg { return DeleteRowMsg{TableName: tableName, RowID: rowID} }
+			}
+			m.deleteArmed = true
+			return m, nil
+		}
+
+		switch keyMsg.String() {
 		case "esc", "enter":
-			// Close the popup by sending a message to the parent.
 			return m, func() tea.Msg { return CloseDetailMsg{} }
 		}
+
+		// Any other key disarms the delete confirmation.
+		m.deleteArmed = false
 	}
 
 	// Delegate to viewport for up/down scrolling.
@@ -101,7 +124,12 @@ func (m RowDetailModel) Update(msg tea.Msg) (RowDetailModel, tea.Cmd) {
 func (m RowDetailModel) View() string {
 	title := TitleStyle.Render(" Row Detail ")
 	content := m.viewport.View()
-	help := StatusBarStyle.Render("↑↓: scroll | esc/enter: close")
+	var help string
+	if m.deleteArmed {
+		help = ErrorStyle.Render("press del again to confirm | any other key cancels")
+	} else {
+		help = StatusBarStyle.Render("↑↓: scroll | esc/enter: close | del: delete")
+	}
 
 	return PopupStyle.
 		Width(m.width - 2).   // -2 for border chars

@@ -14,10 +14,13 @@ import (
 )
 
 // RowSelectedMsg is sent when the user presses enter on a row.
-// Carries column names + that row's values so the popup can display them.
+// Carries column names + that row's values so the popup can display them,
+// plus the table name and rowid so destructive actions can target the row.
 type RowSelectedMsg struct {
-	Columns []string
-	Values  []string
+	Columns   []string
+	Values    []string
+	TableName string
+	RowID     int64
 }
 
 // filterState tracks the two-step filter flow.
@@ -32,6 +35,7 @@ const (
 // pageDataLoadedMsg carries the result of loading a specific page.
 type pageDataLoadedMsg struct {
 	rows      [][]string
+	rowIDs    []int64
 	page      int
 	pageSize  int
 	totalRows int
@@ -53,6 +57,7 @@ type TableDataModel struct {
 	columns     []string   // all columns from the DB
 	displayCols int        // number of columns shown in the table (dynamically computed)
 	allRows     [][]string // rows for the current page (all columns)
+	allRowIDs   []int64    // rowid for each row in allRows (parallel slice)
 	database    *sql.DB    // for DB-level filter queries
 	width       int
 	height      int
@@ -74,7 +79,7 @@ type TableDataModel struct {
 	fPrevPage  int             // page before filter was opened
 }
 
-func NewTableDataModel(name string, columns []string, rows [][]string, width, height int, database *sql.DB, page, pageSize, totalRows int) TableDataModel {
+func NewTableDataModel(name string, columns []string, rows [][]string, rowIDs []int64, width, height int, database *sql.DB, page, pageSize, totalRows int) TableDataModel {
 	innerWidth := width - 2
 	// height is the pane border-box. Content area = height - 2.
 	// bubbles/table with WithHeight(N) outputs N+1 lines.
@@ -116,6 +121,7 @@ func NewTableDataModel(name string, columns []string, rows [][]string, width, he
 		columns:     columns,
 		displayCols: displayCols,
 		allRows:     rows,
+		allRowIDs:   rowIDs,
 		database:    database,
 		width:       width,
 		height:      height,
@@ -160,7 +166,7 @@ func (m TableDataModel) hasPrevPage() bool {
 func loadPageCmd(database *sql.DB, tableName string, page, pageSize int, cursorEnd bool) tea.Cmd {
 	return func() tea.Msg {
 		offset := page * pageSize
-		_, rows, err := db.GetRows(database, tableName, pageSize, offset)
+		_, rowIDs, rows, err := db.GetRows(database, tableName, pageSize, offset)
 		if err != nil {
 			return errMsg{err: err}
 		}
@@ -170,6 +176,7 @@ func loadPageCmd(database *sql.DB, tableName string, page, pageSize int, cursorE
 		}
 		return pageDataLoadedMsg{
 			rows:      rows,
+			rowIDs:    rowIDs,
 			page:      page,
 			pageSize:  pageSize,
 			totalRows: total,
@@ -181,7 +188,7 @@ func loadPageCmd(database *sql.DB, tableName string, page, pageSize int, cursorE
 func loadFilteredPageCmd(database *sql.DB, tableName, fCol, fQuery string, page, pageSize int, cursorEnd bool) tea.Cmd {
 	return func() tea.Msg {
 		offset := page * pageSize
-		_, rows, err := db.FilterColumn(database, tableName, fCol, fQuery, pageSize, offset)
+		_, rowIDs, rows, err := db.FilterColumn(database, tableName, fCol, fQuery, pageSize, offset)
 		if err != nil {
 			return errMsg{err: err}
 		}
@@ -191,6 +198,7 @@ func loadFilteredPageCmd(database *sql.DB, tableName, fCol, fQuery string, page,
 		}
 		return pageDataLoadedMsg{
 			rows:      rows,
+			rowIDs:    rowIDs,
 			page:      page,
 			pageSize:  pageSize,
 			totalRows: total,
@@ -305,10 +313,16 @@ func (m TableDataModel) updateNormal(msg tea.KeyMsg) (TableDataModel, tea.Cmd) {
 	if key.Matches(msg, Keys.Select) {
 		cursor := m.table.Cursor()
 		if cursor >= 0 && cursor < len(m.allRows) {
+			var rowID int64
+			if cursor < len(m.allRowIDs) {
+				rowID = m.allRowIDs[cursor]
+			}
 			return m, func() tea.Msg {
 				return RowSelectedMsg{
-					Columns: m.columns,
-					Values:  m.allRows[cursor],
+					Columns:   m.columns,
+					Values:    m.allRows[cursor],
+					TableName: m.tableName,
+					RowID:     rowID,
 				}
 			}
 		}
@@ -403,7 +417,7 @@ func (m *TableDataModel) applyFilter() {
 		m.fTotalRows = 0
 		return
 	}
-	_, rows, err := db.FilterColumn(m.database, m.tableName, m.fCol, query, m.pageSize, 0)
+	_, _, rows, err := db.FilterColumn(m.database, m.tableName, m.fCol, query, m.pageSize, 0)
 	if err != nil {
 		m.table.SetRows(truncateRows(m.allRows, m.displayCols, m.hasHiddenCols()))
 		m.table.SetCursor(0)

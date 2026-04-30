@@ -30,6 +30,7 @@ type tableDataLoadedMsg struct {
 	tableName string
 	columns   []string
 	rows      [][]string
+	rowIDs    []int64
 	page      int
 	pageSize  int
 	totalRows int
@@ -263,7 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case QueryResultMsg:
 			m.showQuery = false
 			m.tableData = NewTableDataModel(
-				"query result", msg.Columns, msg.Rows,
+				"query result", msg.Columns, msg.Rows, nil,
 				m.rightWidth, m.paneHeight(), m.db,
 				0, len(msg.Rows), len(msg.Rows),
 			)
@@ -279,10 +280,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Row detail popup captures all input when open.
 	if m.showDetail {
-		switch msg.(type) {
+		switch msg := msg.(type) {
 		case CloseDetailMsg:
 			m.showDetail = false
 			return m, nil
+		case DeleteRowMsg:
+			if err := db.DeleteRow(m.db, msg.TableName, msg.RowID); err != nil {
+				m.err = err
+				return m, nil
+			}
+			m.showDetail = false
+			return m, m.tableData.refreshCmd()
 		default:
 			var cmd tea.Cmd
 			m.rowDetail, cmd = m.rowDetail.Update(msg)
@@ -396,7 +404,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tableDataLoadedMsg:
 		m.tableData = NewTableDataModel(
-			msg.tableName, msg.columns, msg.rows,
+			msg.tableName, msg.columns, msg.rows, msg.rowIDs,
 			m.rightWidth, m.paneHeight(), m.db,
 			msg.page, msg.pageSize, msg.totalRows,
 		)
@@ -406,6 +414,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pageDataLoadedMsg:
 		m.tableData.allRows = msg.rows
+		m.tableData.allRowIDs = msg.rowIDs
 		m.tableData.page = msg.page
 		if m.tableData.fActive {
 			m.tableData.fTotalRows = msg.totalRows
@@ -425,7 +434,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, loadTableDataCmd(m.db, msg.Name, m.pageSize())
 
 	case RowSelectedMsg:
-		m.rowDetail = NewRowDetailModel(msg.Columns, msg.Values, m.width, m.height)
+		m.rowDetail = NewRowDetailModel(msg.Columns, msg.Values, msg.TableName, msg.RowID, m.width, m.height)
 		m.showDetail = true
 		return m, nil
 
@@ -485,7 +494,7 @@ func (m Model) View() string {
 		{"[/]", "page"},
 		{"ctrl+e", "query"},
 		{"ctrl+r", "refresh"},
-		{"ctrl+b", "sidebar"},
+		{"ctrl+\\", "sidebar"},
 		{"esc", "back"},
 		{"q", "quit"},
 	}
@@ -558,7 +567,7 @@ func loadTableDataCmd(database *sql.DB, tableName string, pageSize int) tea.Cmd 
 		if err != nil {
 			return errMsg{err: err}
 		}
-		cols, rows, err := db.GetRows(database, tableName, pageSize, 0)
+		cols, rowIDs, rows, err := db.GetRows(database, tableName, pageSize, 0)
 		if err != nil {
 			return errMsg{err: err}
 		}
@@ -566,6 +575,7 @@ func loadTableDataCmd(database *sql.DB, tableName string, pageSize int) tea.Cmd 
 			tableName: tableName,
 			columns:   cols,
 			rows:      rows,
+			rowIDs:    rowIDs,
 			page:      0,
 			pageSize:  pageSize,
 			totalRows: total,

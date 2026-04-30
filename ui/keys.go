@@ -5,15 +5,16 @@ import "github.com/charmbracelet/bubbles/key"
 // KeyMap defines shared key bindings used across all views.
 // Centralizing them here (DRY) means one place to change shortcuts.
 type KeyMap struct {
-	Quit       key.Binding
-	SwitchTab  key.Binding
-	FocusRight key.Binding
-	FocusLeft  key.Binding
-	Select     key.Binding
-	OpenQuery  key.Binding
-	Refresh    key.Binding
-	NextPage   key.Binding
-	PrevPage   key.Binding
+	Quit          key.Binding
+	SwitchTab     key.Binding
+	FocusRight    key.Binding
+	FocusLeft     key.Binding
+	Select        key.Binding
+	OpenQuery     key.Binding
+	Refresh       key.Binding
+	NextPage      key.Binding
+	PrevPage      key.Binding
+	ToggleSidebar key.Binding
 }
 
 var Keys = KeyMap{
@@ -52,5 +53,9 @@ var Keys = KeyMap{
 	PrevPage: key.NewBinding(
 		key.WithKeys("["),
 		key.WithHelp("[", "prev page"),
+	),
+	ToggleSidebar: key.NewBinding(
+		key.WithKeys("ctrl+b"),
+		key.WithHelp("ctrl+b", "toggle sidebar"),
 	),
 }

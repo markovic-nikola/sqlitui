@@ -68,8 +68,9 @@ type Model struct {
 	showQuery  bool
 
 	// Pane dimensions — recalculated on every WindowSizeMsg.
-	leftWidth  int
-	rightWidth int
+	leftWidth     int
+	rightWidth    int
+	sidebarHidden bool
 }
 
 func NewModel(path string) Model {
@@ -111,8 +112,14 @@ func (m Model) Init() tea.Cmd {
 }
 
 // calcPaneSizes splits the terminal width into left (~30%) and right (~70%).
+// When the sidebar is hidden, the right pane gets the full width.
 func (m *Model) calcPaneSizes() {
 	available := m.width - 4
+	if m.sidebarHidden {
+		m.leftWidth = 0
+		m.rightWidth = available
+		return
+	}
 	m.leftWidth = available * 30 / 100
 	if m.leftWidth < 25 {
 		m.leftWidth = 25
@@ -347,6 +354,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		if key.Matches(msg, Keys.ToggleSidebar) {
+			m.sidebarHidden = !m.sidebarHidden
+			if m.sidebarHidden {
+				m.focused = paneData
+			}
+			m.calcPaneSizes()
+			if m.loaded {
+				m.tableList.SetSize(m.leftWidth, m.paneHeight())
+			}
+			if m.dataLoaded {
+				m.tableData.SetSize(m.rightWidth, m.paneHeight())
+			}
+			return m, nil
+		}
+
 		if key.Matches(msg, Keys.Refresh) && m.dataLoaded {
 			if m.tableData.tableName == "query result" {
 				if m.lastTableName == "" {
@@ -463,6 +485,7 @@ func (m Model) View() string {
 		{"[/]", "page"},
 		{"ctrl+e", "query"},
 		{"ctrl+r", "refresh"},
+		{"ctrl+b", "sidebar"},
 		{"esc", "back"},
 		{"q", "quit"},
 	}
@@ -476,13 +499,7 @@ func (m Model) View() string {
 	// 3 = top margin (1) + bottom margin (1) + status bar base (1 line already counted in statusLines adjustment)
 	contentH := max(m.height-3-statusLines, 3) - 2
 
-	leftClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.leftWidth - 2)
 	rightClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.rightWidth - 2)
-
-	leftPanel := leftStyle.
-		Width(m.leftWidth - 2).
-		Height(contentH).
-		Render(leftClip.Render(m.tableList.View()))
 
 	var rightContent string
 	if m.dataLoaded {
@@ -499,7 +516,17 @@ func (m Model) View() string {
 		Height(contentH).
 		Render(rightClip.Render(rightContent))
 
-	split := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	var split string
+	if m.sidebarHidden {
+		split = rightPanel
+	} else {
+		leftClip := lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(m.leftWidth - 2)
+		leftPanel := leftStyle.
+			Width(m.leftWidth - 2).
+			Height(contentH).
+			Render(leftClip.Render(m.tableList.View()))
+		split = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	}
 
 	base := AppStyle.Render(
 		lipgloss.JoinVertical(lipgloss.Left, split, status),

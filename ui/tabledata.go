@@ -227,9 +227,10 @@ func (m *TableDataModel) SetSize(width, height int) {
 
 	displayCols, colWidths := fitColumns(m.columns, m.allRows, innerWidth)
 	m.displayCols = displayCols
-	// SetRows before SetColumns: each call re-renders, and bubbles/table panics if a row has more cells than columns.
-	m.table.SetRows(truncateRows(m.allRows, m.displayCols, m.hasHiddenCols()))
+	// Clear rows before SetColumns so the intermediate re-render can't index a row cell beyond the new columns.
+	m.table.SetRows(nil)
 	m.table.SetColumns(buildTableColumns(m.columns, displayCols, colWidths, len(m.columns)))
+	m.table.SetRows(truncateRows(m.allRows, m.displayCols, m.hasHiddenCols()))
 	m.table.SetHeight(m.tableHeight())
 	m.fInput.Width = innerWidth - 3
 }

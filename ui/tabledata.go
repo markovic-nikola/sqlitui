@@ -213,6 +213,13 @@ func (m TableDataModel) prevPageCmd() tea.Cmd {
 	return loadPageCmd(m.database, m.tableName, m.page-1, m.pageSize, true)
 }
 
+func (m TableDataModel) refreshCmd() tea.Cmd {
+	if m.fActive {
+		return loadFilteredPageCmd(m.database, m.tableName, m.fCol, m.fQuery, m.page, m.pageSize, false)
+	}
+	return loadPageCmd(m.database, m.tableName, m.page, m.pageSize, false)
+}
+
 func (m *TableDataModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
@@ -220,8 +227,9 @@ func (m *TableDataModel) SetSize(width, height int) {
 
 	displayCols, colWidths := fitColumns(m.columns, m.allRows, innerWidth)
 	m.displayCols = displayCols
-	m.table.SetColumns(buildTableColumns(m.columns, displayCols, colWidths, len(m.columns)))
+	// SetRows before SetColumns: each call re-renders, and bubbles/table panics if a row has more cells than columns.
 	m.table.SetRows(truncateRows(m.allRows, m.displayCols, m.hasHiddenCols()))
+	m.table.SetColumns(buildTableColumns(m.columns, displayCols, colWidths, len(m.columns)))
 	m.table.SetHeight(m.tableHeight())
 	m.fInput.Width = innerWidth - 3
 }

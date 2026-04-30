@@ -54,9 +54,10 @@ type Model struct {
 	showPathInput bool
 	filePicker    FilePickerModel
 
-	tableList  TableListModel
-	tableData  TableDataModel
-	dataLoaded bool // true once any table's data has been fetched
+	tableList     TableListModel
+	tableData     TableDataModel
+	dataLoaded    bool   // true once any table's data has been fetched
+	lastTableName string // last real table viewed; used to refresh after a query result overrides the view
 
 	// Modal popup for row detail.
 	rowDetail  RowDetailModel
@@ -346,8 +347,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		if key.Matches(msg, Keys.Refresh) && m.dataLoaded && m.tableData.tableName != "query result" {
-			return m, loadTableDataCmd(m.db, m.tableData.tableName, m.pageSize())
+		if key.Matches(msg, Keys.Refresh) && m.dataLoaded {
+			if m.tableData.tableName == "query result" {
+				if m.lastTableName == "" {
+					return m, nil
+				}
+				return m, loadTableDataCmd(m.db, m.lastTableName, m.pageSize())
+			}
+			return m, m.tableData.refreshCmd()
 		}
 
 		if key.Matches(msg, Keys.OpenQuery) {
@@ -372,6 +379,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.page, msg.pageSize, msg.totalRows,
 		)
 		m.dataLoaded = true
+		m.lastTableName = msg.tableName
 		return m, nil
 
 	case pageDataLoadedMsg:
